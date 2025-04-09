@@ -86,53 +86,61 @@ export default function App() {
 
   return (
     <div className="max-w-xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-bold text-center">🧠 모질띨빡 암호기 (실시간)</h1>
+      <h1 className="text-2xl font-bold text-center text-pink-600">
+        🧠 모질띨빡 암호기 (실시간)
+      </h1>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      {/* 입력영역 */}
+      <div className="space-y-2">
         <input
           type="text"
           placeholder="이름"
-          className="border p-2 rounded col-span-1"
+          className="border px-3 py-2 rounded w-full"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
         <input
           type="password"
-          placeholder="비밀번호 (공유방 키)"
-          className="border p-2 rounded col-span-1"
+          placeholder="비밀번호 (공유 키)"
+          className="border px-3 py-2 rounded w-full"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
         <select
-          className="border p-2 rounded col-span-1"
+          className="border px-3 py-2 rounded w-full"
           value={mode}
           onChange={(e) => setMode(e.target.value as Mode)}
         >
           <option value="encrypt">암호화</option>
           <option value="decrypt">복호화</option>
         </select>
+        <textarea
+          placeholder="평문 입력"
+          className="border px-3 py-2 rounded w-full min-h-[100px]"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <button
+          onClick={handleEncryptOrDecrypt}
+          className="bg-pink-600 text-white w-full py-2 rounded hover:bg-pink-700"
+        >
+          {mode === "encrypt" ? "암호화 후 공유" : "복호화"}
+        </button>
       </div>
 
-      <textarea
-        placeholder="평문 입력"
-        className="w-full border p-2 rounded min-h-[120px]"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-      />
-
-      <button
-        onClick={handleEncryptOrDecrypt}
-        className="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600"
-      >
-        {mode === "encrypt" ? "암호화 후 공유" : "복호화"}
-      </button>
-
-      <div className="mt-6 border-t pt-4">
-        <h2 className="text-xl font-bold mb-2">💬 실시간 대화 로그</h2>
-        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+      {/* 로그 영역 */}
+      <div className="pt-6 border-t">
+        <h2 className="text-lg font-bold mb-2">💬 실시간 대화 로그</h2>
+        <div className="space-y-2 text-sm max-h-[300px] overflow-y-auto">
           {logs.map((log) => (
-            <div key={log.id} className="text-sm">
-              <span className="font-semibold">{log.name}</span> [{log.mode === "encrypt" ? "🔐" : "🔓"}]: {log.mode === "encrypt" ? log.message : ""}
+            <div key={log.id}>
+              <span className="font-semibold">{log.name}</span>:
+              <span className="ml-2 font-mono break-all text-blue-800">
+                {log.message}
+              </span>
+              <div className="text-xs text-gray-500">
+                [{log.timestamp?.toDate().toLocaleTimeString() ?? "..." }]
+              </div>
             </div>
           ))}
         </div>
