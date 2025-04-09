@@ -90,8 +90,8 @@ export default function App() {
         🧠 모질띨빡 암호기 (실시간)
       </h1>
 
-      {/* 입력영역 */}
-      <div className="space-y-2">
+      {/* 입력영역 (세로 정렬 고정) */}
+      <div className="flex flex-col space-y-2">
         <input
           type="text"
           placeholder="이름"
