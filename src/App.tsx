@@ -1,99 +1,143 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import { useState, useEffect } from "react";
 import { db } from "./firebase";
-import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+import {
+  collection,
+  addDoc,
+  query,
+  where,
+  onSnapshot,
+  Timestamp,
+  orderBy,
+} from "firebase/firestore";
 
-function deriveKey(password: string): number {
-  return Array.from(password).reduce((hash, c) => (hash * 31 + c.charCodeAt(0)) % 256, 0);
+function xorEncrypt(text: string, password: string): string {
+  const key = [...password].reduce((a, c) => a + c.charCodeAt(0), 0) % 256;
+  const bytes = new TextEncoder().encode(text).map((b) => b ^ key);
+  return btoa(String.fromCharCode(...bytes));
 }
 
-type Message = {
-  sender: string;
-  result: string;
-  timestamp: string;
-};
+function xorDecrypt(base64: string, password: string): string {
+  const key = [...password].reduce((a, c) => a + c.charCodeAt(0), 0) % 256;
+  try {
+    const str = atob(base64);
+    const decrypted = [...str].map((c) => c.charCodeAt(0) ^ key);
+    return new TextDecoder().decode(new Uint8Array(decrypted));
+  } catch (e) {
+    return "⚠️ 복호화 실패 (Base64 형식 오류)";
+  }
+}
 
-export default function App() {
+function App() {
   const [sender, setSender] = useState("");
   const [password, setPassword] = useState("");
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"encrypt" | "decrypt">("encrypt");
-  const [result, setResult] = useState("");
-  const [logs, setLogs] = useState<Message[]>([]);
+  const [logs, setLogs] = useState<
+    { sender: string; text: string; timestamp: string }[]
+  >([]);
 
-  const roomId = password || "default-room";
-  const key = deriveKey(password);
-
-  const handleProcess = async () => {
-    if (!sender || !password || !text) {
-      setResult("⚠ 이름, 암호, 입력 모두 필요해요.");
-      return;
-    }
-
-    const now = new Date().toLocaleString("ko-KR");
-
+  const handleSubmit = async () => {
+    if (!text || !password || !sender) return;
     if (mode === "encrypt") {
-      const encoder = new TextEncoder();
-      const bytes = encoder.encode(text);
-      const encrypted = bytes.map((b) => b ^ key);
-      const encryptedStr = String.fromCharCode(...encrypted);
-      const base64 = btoa(encryptedStr);
-      setResult(base64);
-
-      await addDoc(collection(db, roomId), {
+      const encrypted = xorEncrypt(text, password);
+      await addDoc(collection(db, "messages"), {
         sender,
-        result: base64,
-        timestamp: now,
+        password,
+        text: encrypted,
+        timestamp: Timestamp.now(),
       });
+      setText("");
     } else {
-      try {
-        const decrypted = atob(text)
-          .split("")
-          .map((c) => c.charCodeAt(0) ^ key);
-        const decoded = new TextDecoder().decode(new Uint8Array(decrypted));
-        setResult(decoded);
-      } catch {
-        setResult("⚠ 복호화 실패");
-      }
+      const decrypted = xorDecrypt(text, password);
+      setLogs((prev) => [
+        ...prev,
+        {
+          sender: "🔓 복호화",
+          text: decrypted,
+          timestamp: new Date().toLocaleString(),
+        },
+      ]);
     }
   };
 
   useEffect(() => {
     if (!password) return;
-    const q = query(collection(db, roomId), orderBy("timestamp"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const messages: Message[] = snapshot.docs.map((doc) => doc.data() as Message);
-      setLogs(messages);
+    const q = query(
+      collection(db, "messages"),
+      where("password", "==", password),
+      orderBy("timestamp", "asc")
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map((doc) => {
+        const d = doc.data();
+        return {
+          sender: d.sender,
+          text: d.text,
+          timestamp: d.timestamp?.toDate().toLocaleString() || "",
+        };
+      });
+      setLogs(data);
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, [password]);
 
   return (
-    <div style={{ maxWidth: 600, margin: "0 auto" }}>
-      <h1>🧠 모질띨빡 암호기 (실시간)</h1>
+    <div className="max-w-xl mx-auto p-4 space-y-4">
+      <h1 className="text-2xl font-bold text-center text-pink-600">
+        🧠 모질띨빡 암호기 (실시간)
+      </h1>
 
-      <input value={sender} onChange={(e) => setSender(e.target.value)} placeholder="이름" />
-      <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="비밀번호 (공유방 키)" />
-      <select value={mode} onChange={(e) => setMode(e.target.value as any)}>
-        <option value="encrypt">암호화</option>
-        <option value="decrypt">복호화</option>
-      </select>
-      <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder={mode === "encrypt" ? "평문 입력" : "암호문 입력"} />
-      <button onClick={handleProcess}>{mode === "encrypt" ? "암호화 후 공유" : "복호화"}</button>
-
-      {result && (
-        <div style={{ marginTop: 10, background: "#f0f0f0", padding: 10 }}>
-          <strong>{mode === "encrypt" ? "암호문" : "복호문"}:</strong> {result}
+      <div className="space-y-2">
+        <input
+          placeholder="이름"
+          className="w-full p-2 border rounded"
+          value={sender}
+          onChange={(e) => setSender(e.target.value)}
+        />
+        <input
+          placeholder="비밀번호 (공유방 키)"
+          className="w-full p-2 border rounded"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <textarea
+          placeholder="평문 입력"
+          className="w-full p-2 border rounded"
+          rows={3}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="flex justify-between items-center">
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "encrypt" | "decrypt")}
+            className="border rounded px-2 py-1"
+          >
+            <option value="encrypt">암호화</option>
+            <option value="decrypt">복호화</option>
+          </select>
+          <button
+            className="bg-pink-600 text-white px-4 py-2 rounded"
+            onClick={handleSubmit}
+          >
+            암호화 후 공유
+          </button>
         </div>
-      )}
+      </div>
 
-      <h2>💬 실시간 대화 로그</h2>
-      <ul>
-        {logs.map((msg, i) => (
-          <li key={i}>
-            [{msg.timestamp}] {msg.sender}: {msg.result}
-          </li>
+      <hr className="my-4" />
+
+      <h2 className="text-lg font-bold">💬 실시간 대화 로그</h2>
+      <div className="space-y-1 text-sm">
+        {logs.map((log, i) => (
+          <div key={i}>
+            [{log.timestamp}] <strong>{log.sender}</strong>: {log.text}
+          </div>
         ))}
-      </ul>
+      </div>
     </div>
   );
 }
+
+export default App;
