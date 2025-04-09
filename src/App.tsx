@@ -1,23 +1,27 @@
-import React, { useEffect, useState } from "react";
+
+import React from "react";
+import { useEffect, useState } from "react";
+import { db } from "./firebase";
 import {
   collection,
   addDoc,
-  serverTimestamp,
-  query,
   onSnapshot,
+  query,
   orderBy,
+  Timestamp,
 } from "firebase/firestore";
-import { db } from "./firebase";
-
-type Mode = "encrypt" | "decrypt";
+import { ShieldCheck, Unlock } from "lucide-react";
 
 interface ChatLog {
-  id: string;
-  name: string;
-  mode: Mode;
-  message: string;
-  timestamp: any;
+  id?: string;
+  sender: string;
+  password: string;
+  text: string;
+  mode: "encrypt" | "decrypt";
+  timestamp: Timestamp;
 }
+
+type Mode = "encrypt" | "decrypt";
 
 function deriveKeyFromPassword(password: string): number {
   let hash = 0;
@@ -28,16 +32,15 @@ function deriveKeyFromPassword(password: string): number {
 }
 
 export default function App() {
-  const [name, setName] = useState("");
-  const [text, setText] = useState("");
+  const [sender, setSender] = useState("");
   const [password, setPassword] = useState("");
+  const [text, setText] = useState("");
   const [mode, setMode] = useState<Mode>("encrypt");
   const [logs, setLogs] = useState<ChatLog[]>([]);
 
-  const key = deriveKeyFromPassword(password);
-
-  const handleEncryptOrDecrypt = async () => {
-    if (!text || !password || !name) return;
+  const handleProcess = async () => {
+    if (!text || !password || !sender) return;
+    const key = deriveKeyFromPassword(password);
 
     if (mode === "encrypt") {
       const encoder = new TextEncoder();
@@ -47,12 +50,12 @@ export default function App() {
       const base64 = btoa(encryptedStr);
 
       await addDoc(collection(db, "messages"), {
-        name,
-        mode: "encrypt",
-        message: base64,
-        timestamp: serverTimestamp(),
+        sender,
+        password,
+        text: base64,
+        mode,
+        timestamp: Timestamp.now(),
       });
-
       setText("");
     } else {
       try {
@@ -61,9 +64,17 @@ export default function App() {
         const decryptedBytes = encrypted.map((b) => b ^ key);
         const decoder = new TextDecoder();
         const decryptedText = decoder.decode(new Uint8Array(decryptedBytes));
-        setText(decryptedText);
-      } catch (err) {
-        setText("⚠️ 복호화 실패: 올바른 Base64 형식이 아닙니다.");
+
+        await addDoc(collection(db, "messages"), {
+          sender,
+          password,
+          text: decryptedText,
+          mode,
+          timestamp: Timestamp.now(),
+        });
+        setText("");
+      } catch {
+        alert("⚠️ 복호화 실패: 올바른 Base64 형식이 아닙니다.");
       }
     }
   };
@@ -71,43 +82,36 @@ export default function App() {
   useEffect(() => {
     const q = query(collection(db, "messages"), orderBy("timestamp", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newLogs: ChatLog[] = snapshot.docs.map((doc) => {
-        const data = doc.data() as Omit<ChatLog, "id">;
-        return {
-          id: doc.id,
-          ...data,
-        };
-      });
+      const newLogs: ChatLog[] = snapshot.docs.map((doc) => ({
+        ...(doc.data() as ChatLog),
+        id: doc.id,
+      }));
       setLogs(newLogs);
     });
-
     return () => unsubscribe();
   }, []);
 
   return (
-    <div className="max-w-xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-bold text-center text-pink-600">
-        🧠 모질띨빡 암호기 (실시간)
+    <div className="min-h-screen bg-gray-50 p-4">
+      <h1 className="text-2xl font-bold text-center mb-4">
+        <span className="mr-2">🧠</span>모질띨빡 암호기 (실시간)
       </h1>
 
-      {/* 입력영역 (세로 정렬 고정) */}
-      <div className="flex flex-col space-y-2">
+      <div className="flex flex-col space-y-2 max-w-2xl mx-auto">
         <input
-          type="text"
+          className="border px-2 py-1"
           placeholder="이름"
-          className="border px-3 py-2 rounded w-full"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={sender}
+          onChange={(e) => setSender(e.target.value)}
         />
         <input
-          type="password"
+          className="border px-2 py-1"
           placeholder="비밀번호 (공유 키)"
-          className="border px-3 py-2 rounded w-full"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
         <select
-          className="border px-3 py-2 rounded w-full"
+          className="border px-2 py-1"
           value={mode}
           onChange={(e) => setMode(e.target.value as Mode)}
         >
@@ -115,31 +119,36 @@ export default function App() {
           <option value="decrypt">복호화</option>
         </select>
         <textarea
+          className="border px-2 py-1"
           placeholder="평문 입력"
-          className="border px-3 py-2 rounded w-full min-h-[100px]"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
         <button
-          onClick={handleEncryptOrDecrypt}
-          className="bg-pink-600 text-white w-full py-2 rounded hover:bg-pink-700"
+          className="bg-indigo-500 text-white px-4 py-2 rounded"
+          onClick={handleProcess}
         >
-          {mode === "encrypt" ? "암호화 후 공유" : "복호화"}
+          암호화 후 공유
         </button>
       </div>
 
-      {/* 로그 영역 */}
-      <div className="pt-6 border-t">
-        <h2 className="text-lg font-bold mb-2">💬 실시간 대화 로그</h2>
-        <div className="space-y-2 text-sm max-h-[300px] overflow-y-auto">
+      <div className="mt-6 max-w-2xl mx-auto">
+        <h2 className="text-xl font-bold mb-2 flex items-center">
+          <span className="mr-2">💬</span>실시간 대화 로그
+        </h2>
+        <div className="space-y-2">
           {logs.map((log) => (
-            <div key={log.id}>
-              <span className="font-semibold">{log.name}</span>:
-              <span className="ml-2 font-mono break-all text-blue-800">
-                {log.message}
-              </span>
-              <div className="text-xs text-gray-500">
-                [{log.timestamp?.toDate().toLocaleTimeString() ?? "..." }]
+            <div key={log.id} className="bg-white p-3 rounded shadow">
+              <div className="text-sm text-gray-500 mb-1">
+                [{log.timestamp.toDate().toLocaleString()}] {log.sender}:
+              </div>
+              <div className="flex items-center space-x-2">
+                {log.mode === "encrypt" ? (
+                  <ShieldCheck className="text-green-500 w-4 h-4" />
+                ) : (
+                  <Unlock className="text-yellow-500 w-4 h-4" />
+                )}
+                <span>{log.text}</span>
               </div>
             </div>
           ))}
