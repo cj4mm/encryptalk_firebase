@@ -1,143 +1,142 @@
-import React from "react";
-import { useState, useEffect } from "react";
-import { db } from "./firebase";
+import React, { useEffect, useState } from "react";
 import {
   collection,
   addDoc,
+  serverTimestamp,
   query,
-  where,
   onSnapshot,
-  Timestamp,
   orderBy,
 } from "firebase/firestore";
+import { db } from "./firebase";
 
-function xorEncrypt(text: string, password: string): string {
-  const key = [...password].reduce((a, c) => a + c.charCodeAt(0), 0) % 256;
-  const bytes = new TextEncoder().encode(text).map((b) => b ^ key);
-  return btoa(String.fromCharCode(...bytes));
+type Mode = "encrypt" | "decrypt";
+
+interface ChatLog {
+  id: string;
+  name: string;
+  mode: Mode;
+  message: string;
+  timestamp: any;
 }
 
-function xorDecrypt(base64: string, password: string): string {
-  const key = [...password].reduce((a, c) => a + c.charCodeAt(0), 0) % 256;
-  try {
-    const str = atob(base64);
-    const decrypted = [...str].map((c) => c.charCodeAt(0) ^ key);
-    return new TextDecoder().decode(new Uint8Array(decrypted));
-  } catch (e) {
-    return "⚠️ 복호화 실패 (Base64 형식 오류)";
+function deriveKeyFromPassword(password: string): number {
+  let hash = 0;
+  for (let i = 0; i < password.length; i++) {
+    hash = (hash * 31 + password.charCodeAt(i)) % 256;
   }
+  return hash;
 }
 
-function App() {
-  const [sender, setSender] = useState("");
-  const [password, setPassword] = useState("");
+export default function App() {
+  const [name, setName] = useState("");
   const [text, setText] = useState("");
-  const [mode, setMode] = useState<"encrypt" | "decrypt">("encrypt");
-  const [logs, setLogs] = useState<
-    { sender: string; text: string; timestamp: string }[]
-  >([]);
+  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<Mode>("encrypt");
+  const [logs, setLogs] = useState<ChatLog[]>([]);
 
-  const handleSubmit = async () => {
-    if (!text || !password || !sender) return;
+  const key = deriveKeyFromPassword(password);
+
+  const handleEncryptOrDecrypt = async () => {
+    if (!text || !password || !name) return;
+
     if (mode === "encrypt") {
-      const encrypted = xorEncrypt(text, password);
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(text);
+      const encrypted = bytes.map((b) => b ^ key);
+      const encryptedStr = String.fromCharCode(...encrypted);
+      const base64 = btoa(encryptedStr);
+
       await addDoc(collection(db, "messages"), {
-        sender,
-        password,
-        text: encrypted,
-        timestamp: Timestamp.now(),
+        name,
+        mode: "encrypt",
+        message: base64,
+        timestamp: serverTimestamp(),
       });
+
       setText("");
     } else {
-      const decrypted = xorDecrypt(text, password);
-      setLogs((prev) => [
-        ...prev,
-        {
-          sender: "🔓 복호화",
-          text: decrypted,
-          timestamp: new Date().toLocaleString(),
-        },
-      ]);
+      try {
+        const binaryStr = atob(text);
+        const encrypted = [...binaryStr].map((c) => c.charCodeAt(0));
+        const decryptedBytes = encrypted.map((b) => b ^ key);
+        const decoder = new TextDecoder();
+        const decryptedText = decoder.decode(new Uint8Array(decryptedBytes));
+        setText(decryptedText);
+      } catch (err) {
+        setText("⚠️ 복호화 실패: 올바른 Base64 형식이 아닙니다.");
+      }
     }
   };
 
   useEffect(() => {
-    if (!password) return;
-    const q = query(
-      collection(db, "messages"),
-      where("password", "==", password),
-      orderBy("timestamp", "asc")
-    );
-    const unsub = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => {
-        const d = doc.data();
+    const q = query(collection(db, "messages"), orderBy("timestamp", "asc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newLogs: ChatLog[] = snapshot.docs.map((doc) => {
+        const data = doc.data() as Omit<ChatLog, "id">;
         return {
-          sender: d.sender,
-          text: d.text,
-          timestamp: d.timestamp?.toDate().toLocaleString() || "",
+          id: doc.id,
+          ...data,
         };
       });
-      setLogs(data);
+      setLogs(newLogs);
     });
-    return () => unsub();
-  }, [password]);
+
+    return () => unsubscribe();
+  }, []);
 
   return (
     <div className="max-w-xl mx-auto p-4 space-y-4">
-      <h1 className="text-2xl font-bold text-center text-pink-600">
-        🧠 모질띨빡 암호기 (실시간)
-      </h1>
+      <h1 className="text-2xl font-bold text-center">🧠 모질띨빡 암호기 (실시간)</h1>
 
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <input
+          type="text"
           placeholder="이름"
-          className="w-full p-2 border rounded"
-          value={sender}
-          onChange={(e) => setSender(e.target.value)}
+          className="border p-2 rounded col-span-1"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
         />
         <input
+          type="password"
           placeholder="비밀번호 (공유방 키)"
-          className="w-full p-2 border rounded"
+          className="border p-2 rounded col-span-1"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        <textarea
-          placeholder="평문 입력"
-          className="w-full p-2 border rounded"
-          rows={3}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-        />
-        <div className="flex justify-between items-center">
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as "encrypt" | "decrypt")}
-            className="border rounded px-2 py-1"
-          >
-            <option value="encrypt">암호화</option>
-            <option value="decrypt">복호화</option>
-          </select>
-          <button
-            className="bg-pink-600 text-white px-4 py-2 rounded"
-            onClick={handleSubmit}
-          >
-            암호화 후 공유
-          </button>
-        </div>
+        <select
+          className="border p-2 rounded col-span-1"
+          value={mode}
+          onChange={(e) => setMode(e.target.value as Mode)}
+        >
+          <option value="encrypt">암호화</option>
+          <option value="decrypt">복호화</option>
+        </select>
       </div>
 
-      <hr className="my-4" />
+      <textarea
+        placeholder="평문 입력"
+        className="w-full border p-2 rounded min-h-[120px]"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
 
-      <h2 className="text-lg font-bold">💬 실시간 대화 로그</h2>
-      <div className="space-y-1 text-sm">
-        {logs.map((log, i) => (
-          <div key={i}>
-            [{log.timestamp}] <strong>{log.sender}</strong>: {log.text}
-          </div>
-        ))}
+      <button
+        onClick={handleEncryptOrDecrypt}
+        className="bg-indigo-500 text-white px-4 py-2 rounded hover:bg-indigo-600"
+      >
+        {mode === "encrypt" ? "암호화 후 공유" : "복호화"}
+      </button>
+
+      <div className="mt-6 border-t pt-4">
+        <h2 className="text-xl font-bold mb-2">💬 실시간 대화 로그</h2>
+        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+          {logs.map((log) => (
+            <div key={log.id} className="text-sm">
+              <span className="font-semibold">{log.name}</span> [{log.mode === "encrypt" ? "🔐" : "🔓"}]: {log.mode === "encrypt" ? log.message : ""}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
-
-export default App;
